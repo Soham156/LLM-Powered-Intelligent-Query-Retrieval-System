@@ -22,7 +22,7 @@ class Config:
     # Embedding Configuration
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     VECTOR_DIMENSION = int(os.getenv("VECTOR_DIMENSION", 384))
-    SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", 0.7))
+    SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", 0.3))
     
     # Processing Configuration
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 1000))

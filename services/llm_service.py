@@ -1,8 +1,8 @@
 import os
 try:
-    import openai
+    from openai import OpenAI
 except ImportError:
-    openai = None
+    OpenAI = None
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -12,23 +12,27 @@ logger = logging.getLogger(__name__)
 class LLMService:
     """
     Handles LLM interactions for question answering and decision making.
-    Uses OpenAI GPT-4 for intelligent analysis and response generation.
+    Uses Hugging Face router with Llama model for intelligent analysis and response generation.
     """
     
     def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise Exception("OPENAI_API_KEY environment variable is required")
+        self.hf_token = os.getenv("HF_TOKEN")
+        if not self.hf_token:
+            raise Exception("HF_TOKEN environment variable is required")
         
-        if openai is None:
+        if OpenAI is None:
             raise Exception("OpenAI package not installed. Please install with: pip install openai")
         
-        openai.api_key = self.api_key
-        self.model = os.getenv("LLM_MODEL", "gpt-4")
+        # Initialize OpenAI client with Hugging Face router base URL
+        self.client = OpenAI(
+            base_url="https://router.huggingface.co/v1",
+            api_key=self.hf_token
+        )
+        self.model = os.getenv("LLM_MODEL", "meta-llama/Llama-3.2-1B-Instruct:novita")
         self.max_tokens = int(os.getenv("MAX_TOKENS", "2000"))
         self.temperature = float(os.getenv("TEMPERATURE", "0.1"))
         
-        logger.info(f"Initialized LLM service with model: {self.model}")
+        logger.info(f"Initialized LLM service with Hugging Face model: {self.model}")
     
     def create_system_prompt(self) -> str:
         """Create the system prompt for document analysis."""
@@ -89,22 +93,20 @@ Please analyze the document context and provide a detailed, accurate answer to t
                 {"role": "user", "content": user_prompt}
             ]
             
-            # Make API call to OpenAI
-            response = openai.ChatCompletion.create(
+            # Make API call to Hugging Face router using OpenAI client format
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                top_p=0.9,
-                frequency_penalty=0.1,
-                presence_penalty=0.1
+                temperature=self.temperature
             )
             
             answer = response.choices[0].message.content.strip()
             
             # Log token usage
-            usage = response.get('usage', {})
-            logger.info(f"Generated answer with {usage.get('total_tokens', 'unknown')} tokens")
+            usage = response.usage if hasattr(response, 'usage') else {}
+            total_tokens = usage.total_tokens if hasattr(usage, 'total_tokens') else 'unknown'
+            logger.info(f"Generated answer with {total_tokens} tokens")
             
             return answer
             
