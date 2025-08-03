@@ -1,29 +1,29 @@
 import os
 import numpy as np
-import faiss
 import logging
 from typing import List, Dict, Any, Tuple
 from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 logger = logging.getLogger(__name__)
 
 class EmbeddingService:
     """
-    Handles text embeddings and vector similarity search using FAISS.
+    Handles text embeddings and vector similarity search using sklearn.
     Provides semantic search capabilities for document chunks.
     """
     
     def __init__(self):
         self.model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         self.vector_dimension = int(os.getenv("VECTOR_DIMENSION", "384"))
-        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))
+        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
         
         # Initialize the embedding model
         logger.info(f"Loading embedding model: {self.model_name}")
         self.model = SentenceTransformer(self.model_name)
         
-        # FAISS index will be created when needed
-        self.index = None
+        # Store embeddings and metadata
+        self.embeddings = None
         self.chunk_metadata = []
     
     def create_embeddings(self, texts: List[str]) -> np.ndarray:
@@ -39,7 +39,7 @@ class EmbeddingService:
             raise Exception(f"Failed to create embeddings: {str(e)}")
     
     def build_vector_index(self, chunks: List[Dict[str, Any]]) -> None:
-        """Build FAISS index from document chunks."""
+        """Build vector index from document chunks."""
         try:
             logger.info(f"Building vector index for {len(chunks)} chunks")
             
@@ -47,24 +47,12 @@ class EmbeddingService:
             texts = [chunk['text'] for chunk in chunks]
             
             # Create embeddings
-            embeddings = self.create_embeddings(texts)
-            
-            # Ensure embeddings are float32 for FAISS
-            embeddings = embeddings.astype('float32')
-            
-            # Create FAISS index
-            self.index = faiss.IndexFlatIP(self.vector_dimension)  # Inner product for cosine similarity
-            
-            # Normalize vectors for cosine similarity
-            faiss.normalize_L2(embeddings)
-            
-            # Add embeddings to index
-            self.index.add(embeddings)
+            self.embeddings = self.create_embeddings(texts)
             
             # Store chunk metadata
             self.chunk_metadata = chunks
             
-            logger.info(f"Successfully built vector index with {self.index.ntotal} vectors")
+            logger.info(f"Successfully built vector index with {len(self.embeddings)} vectors")
             
         except Exception as e:
             logger.error(f"Error building vector index: {str(e)}")
@@ -76,27 +64,26 @@ class EmbeddingService:
         Returns ranked results with similarity scores.
         """
         try:
-            if self.index is None:
+            if self.embeddings is None:
                 raise Exception("Vector index not built. Call build_vector_index first.")
             
             logger.info(f"Searching for similar chunks to query: {query[:100]}...")
             
             # Create query embedding
             query_embedding = self.create_embeddings([query])
-            query_embedding = query_embedding.astype('float32')
             
-            # Normalize for cosine similarity
-            faiss.normalize_L2(query_embedding)
+            # Calculate cosine similarities
+            similarities = cosine_similarity(query_embedding, self.embeddings)[0]
             
-            # Search the index
-            scores, indices = self.index.search(query_embedding, min(top_k, len(self.chunk_metadata)))
+            # Get top-k indices
+            top_indices = np.argsort(similarities)[::-1][:top_k]
             
             # Prepare results
             results = []
-            for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
+            for i, idx in enumerate(top_indices):
                 if idx < len(self.chunk_metadata):  # Valid index
                     chunk = self.chunk_metadata[idx].copy()
-                    chunk['similarity_score'] = float(score)
+                    chunk['similarity_score'] = float(similarities[idx])
                     chunk['rank'] = i + 1
                     results.append(chunk)
             
